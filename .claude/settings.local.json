@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude mcp *)",
+      "PowerShell(claude mcp *)",
+      "mcp__notebooklm__ask_question"
+    ]
+  }
+}
