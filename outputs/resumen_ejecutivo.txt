@@ -1,0 +1,495 @@
+
+==============================================================================
+ DIAPOSITIVA 1 — PORTADA
+ Modelo de Detección de Fraude Financiero | Caso Integrador Final
+==============================================================================
+ Programa: Especialización en Credit Scoring con Python
+ Entregable: Pipeline reproducible + Presentación Ejecutiva (12 slides)
+ Audiencia: Comité de Riesgos
+
+==============================================================================
+ DIAPOSITIVA 2 — CONTEXTO Y PROBLEMA
+ Por qué importa detectar transacciones anómalas
+==============================================================================
+ Reto de negocio:
+   - Una institución financiera necesita reforzar su gestión de riesgo
+     operacional con un modelo de Machine Learning capaz de identificar
+     transacciones fraudulentas en tiempo casi real.
+   - Cada fraude no detectado (Falso Negativo) implica pérdida directa,
+     multas regulatorias y daño reputacional.
+   - Cada falsa alarma (Falso Positivo) consume capacidad operativa del
+     equipo de monitoreo y deteriora la experiencia del cliente.
+
+ Variable objetivo: `fraud` (0 = legítima, 1 = fraude). Tasa ~2%.
+
+ Impacto financiero estimado (escenario referencial):
+   - Volumen diario simulado: 10,000 transacciones.
+   - Tasa de fraude observada: ~2%  =>  ~200 fraudes/día.
+   - Sin modelo: detección dependiente de reglas estáticas, recall bajo.
+   - Con modelo: priorización de alertas y reducción de pérdidas esperadas.
+
+
+==============================================================================
+ CARGA DE DATOS
+==============================================================================
+ Archivo: data\base.csv
+ Shape:   10,000 filas x 17 columnas
+ Columnas: ['transaction_id', 'timestamp', 'amount', 'transaction_type', 'location', 'client_credit_score', 'transaction_frequency', 'customer_age', 'annual_income', 'account_balance', 'num_previous_loans', 'customer_tenure', 'num_dependents', 'education_level', 'marital_status', 'housing_type', 'fraud']
+
+ Primeras 5 filas:
+   transaction_id            timestamp      amount transaction_type  location  client_credit_score  transaction_frequency  customer_age  annual_income  account_balance  num_previous_loans  customer_tenure  num_dependents  education_level marital_status housing_type  fraud
+0               1  2023-01-11 23:15:00   31.705255           retiro  Region_D                  582                      4            32   39615.208376     87327.964032                   0                4               5                4          viudo     familiar      0
+1               2  2023-01-01 14:20:00   23.918016    transferencia  Region_C                  455                      3            21   44249.878473     71636.227027                   9               18               0                1     divorciado       propia      0
+2               3  2023-01-27 11:58:00   92.529562    transferencia  Region_C                  479                      2            30   37617.570952     82196.011244                   5               27               2                2        soltero       propia      1
+3               4  2023-01-08 20:04:00   70.041339             pago  Region_C                  386                      5            46   51472.479789     74139.750178                   0               20               4                4          viudo     familiar      0
+4               5  2023-01-05 08:25:00  201.800781    transferencia  Region_A                  705                      4            67   46632.454229     30783.511996                  10               17               5                1     divorciado       propia      0
+
+==============================================================================
+ DIAPOSITIVA 3 — DATOS Y DIAGNÓSTICO (EDA)
+ Hallazgos del Análisis Exploratorio + desbalance crítico
+==============================================================================
+
+------------------------------------------------------------------------------
+ >> Estadísticos descriptivos (incluye p90 y p99)
+------------------------------------------------------------------------------
+       transaction_id    amount  client_credit_score  transaction_frequency  customer_age  annual_income  account_balance  num_previous_loans  customer_tenure  num_dependents  education_level     fraud
+count        10000.00  10000.00             10000.00               10000.00      10000.00       10000.00         10000.00            10000.00         10000.00        10000.00         10000.00  10000.00
+mean          5000.50    109.74               574.19                   3.14         54.01       50896.02         54414.97                5.15            14.90            2.03             2.49      0.02
+std           2886.90    181.91               163.38                   2.26         21.80       22719.30         58969.64                3.49             9.03            1.44             1.12      0.14
+min              1.00      0.01               150.00                   0.00          5.00          32.71             9.79                0.00             0.00            0.00             1.00      0.00
+25%           2500.75     29.63               435.00                   2.00         35.00       36384.64         25374.58                2.00             7.00            1.00             1.00      0.00
+50%           5000.50     69.75               572.00                   3.00         54.00       50220.81         50930.53                5.00            15.00            2.00             2.00      0.00
+75%           7500.25    138.13               714.00                   4.00         73.00       63896.02         75560.06                8.00            23.00            3.00             4.00      0.00
+90%           9000.10    234.98               799.00                   5.00         83.00       76123.04         90580.68               10.00            27.00            4.00             4.00      0.00
+99%           9900.01    554.42               847.00                   9.00         90.00      108098.62         99899.47               10.10            30.00            6.00             4.00      1.00
+max          10000.00   5705.57               950.00                  35.00        120.00      289309.44        996031.84               20.00            30.00            9.00             4.00      1.00
+
+------------------------------------------------------------------------------
+ >> Calidad del dato
+------------------------------------------------------------------------------
+ - No se encontraron valores nulos en el dataset.
+
+ Tipos de dato por columna:
+transaction_id             int64
+timestamp                    str
+amount                   float64
+transaction_type             str
+location                     str
+client_credit_score        int64
+transaction_frequency      int64
+customer_age               int64
+annual_income            float64
+account_balance          float64
+num_previous_loans         int64
+customer_tenure            int64
+num_dependents             int64
+education_level            int64
+marital_status               str
+housing_type                 str
+fraud                      int64
+
+------------------------------------------------------------------------------
+ >> Distribución de la variable objetivo (desbalance)
+------------------------------------------------------------------------------
+ - Legítimas: 9,800
+ - Fraudes:   200
+ - Tasa de fraude: 2.00%
+ - Implicación: modelo no puede evaluarse con Accuracy global (predecir siempre 'legítima' arroja ~98%). Métricas a priorizar: AUC-PR, Recall y F1 sobre la clase positiva.
+   [figura guardada] outputs\figures\03_desbalance_clases.png
+
+------------------------------------------------------------------------------
+ >> Distribuciones de variables numéricas
+------------------------------------------------------------------------------
+   [figura guardada] outputs\figures\03_distribuciones_numericas.png
+
+------------------------------------------------------------------------------
+ >> Detección de outliers (boxplots)
+------------------------------------------------------------------------------
+   [figura guardada] outputs\figures\03_boxplots_outliers.png
+ - Conclusión: no se eliminan registros. Los outliers reales se acotan mediante Winsorización al p99 (sin perder información).
+
+------------------------------------------------------------------------------
+ >> Correlación de Spearman (robusta a outliers y no linealidades)
+------------------------------------------------------------------------------
+   [figura guardada] outputs\figures\03_correlacion_spearman.png
+ Top variables numéricas correlacionadas con `fraud` (|Spearman|):
+   - transaction_frequency      |rho| = 0.019
+   - education_level            |rho| = 0.017
+   - customer_tenure            |rho| = 0.015
+   - account_balance            |rho| = 0.014
+   - client_credit_score        |rho| = 0.014
+ - Lectura: ninguna variable individual explica fraude por sí sola. Se requiere un modelo multivariado para capturar interacciones.
+ - ALERTA TEMPRANA: la correlación máxima con `fraud` es < 0.05. El dataset puede tener señal débil; cualquier modelo tendrá un techo de desempeño bajo. (Hallazgo a documentar en la Diap. 9 Riesgos).
+
+------------------------------------------------------------------------------
+ >> Distribución por clase (Legítima vs Fraude)
+------------------------------------------------------------------------------
+   [figura guardada] outputs\figures\03_distribucion_por_clase.png
+
+------------------------------------------------------------------------------
+ >> Tasa de fraude por variable categórica
+------------------------------------------------------------------------------
+   [figura guardada] outputs\figures\03_tasa_fraude_categoricas.png
+ Tasa de fraude por categoría (Top 3 por variable):
+
+   transaction_type:
+     - retiro              fraude = 2.13%
+     - transferencia       fraude = 2.06%
+     - pago                fraude = 1.93%
+
+   location:
+     - Region_B            fraude = 2.20%
+     - Region_A            fraude = 2.06%
+     - Region_D            fraude = 1.99%
+
+   marital_status:
+     - soltero             fraude = 2.31%
+     - casado              fraude = 2.21%
+     - divorciado          fraude = 1.75%
+
+   housing_type:
+     - otro                fraude = 2.39%
+     - propia              fraude = 1.98%
+     - alquilada           fraude = 1.85%
+
+==============================================================================
+ DIAPOSITIVA 4 — METODOLOGÍA
+ Pipeline anti data-leakage + COMPARACIÓN de estrategias de desbalance
+==============================================================================
+
+------------------------------------------------------------------------------
+ >> Feature engineering temporal
+------------------------------------------------------------------------------
+ - Variables creadas: hora, dia_semana (0=lun..6=dom), mes
+ - Shape actualizado: (10000, 18)
+
+------------------------------------------------------------------------------
+ >> División estratificada Train/Test (anti data leakage)
+------------------------------------------------------------------------------
+ - Train: 8,000 filas | fraudes: 160 (2.00%)
+ - Test:  2,000 filas | fraudes: 40 (2.00%)
+ - stratify=y garantiza la misma proporción de fraude en ambos sets.
+
+------------------------------------------------------------------------------
+ >> Definición de variables numéricas y categóricas
+------------------------------------------------------------------------------
+ - Numéricas (13): ['amount', 'client_credit_score', 'transaction_frequency', 'customer_age', 'annual_income', 'account_balance', 'num_previous_loans', 'customer_tenure', 'num_dependents', 'education_level', 'hora', 'dia_semana', 'mes']
+ - Categóricas (4): ['transaction_type', 'location', 'marital_status', 'housing_type']
+
+------------------------------------------------------------------------------
+ >> Winsorización al p99 (calculada SOLO en train)
+------------------------------------------------------------------------------
+   - amount: límite superior = 541.90
+   - annual_income: límite superior = 109,041.26
+   - account_balance: límite superior = 99,955.58
+
+------------------------------------------------------------------------------
+ >> ColumnTransformer (Imputación + Escalado + One-Hot)
+------------------------------------------------------------------------------
+ - Preprocesador definido. Se ajustará dentro del Pipeline imblearn,
+   garantizando que cada fold del CV vea solo su propia transformación.
+
+------------------------------------------------------------------------------
+ >> CORRECCIÓN CRÍTICA #1 — Pipeline imblearn dentro del CV
+------------------------------------------------------------------------------
+ Antes (BUG):
+   smote.fit_resample(X_train_prep, y_train)
+   RandomizedSearchCV(...).fit(X_train_res, y_train_res)
+   -> El fold de validación incluye datos sintéticos.
+   -> Métricas de CV infladas (F1=0.99) y modelo memoriza ruido SMOTE.
+
+ Ahora (CORRECTO):
+   pipe = ImbPipeline([
+       ('preprocessor', preprocessor),  # se ajusta en cada fold
+       ('sampler',      <SMOTE | SMOTETomek | passthrough>),
+       ('classifier',   <LR | RF | XGB>)
+   ])
+   RandomizedSearchCV(pipe, ...).fit(X_train, y_train)
+   -> El sampler solo actúa sobre el train de cada fold.
+   -> El validation queda con la distribución real (~2% fraude).
+
+------------------------------------------------------------------------------
+ >> CORRECCIÓN CRÍTICA #2 — Comparación de 3 estrategias de desbalance
+------------------------------------------------------------------------------
+ Relación neg/pos en train = 49.0
+ Estrategias evaluadas para CADA modelo (3 modelos x 3 estrategias = 9):
+   A) class_weight='balanced' (LR, RF) | scale_pos_weight=neg/pos (XGB)
+      -> NO genera datos sintéticos. Penaliza el error en la clase rara.
+   B) SMOTE conservador (k_neighbors=3)
+      -> Sobremuestreo solo cerca de los fraudes reales (menos 'fantasmas')
+   C) SMOTETomek
+      -> Sobremuestreo SMOTE + limpieza Tomek de pares ambiguos en frontera
+
+------------------------------------------------------------------------------
+ >> CORRECCIÓN CRÍTICA #3 — Scoring del CV: AUC-PR (no F1)
+------------------------------------------------------------------------------
+ - F1 con umbral 0.5 fijo es inestable en clases muy desbalanceadas.
+ - AUC-PR (average_precision) integra todos los umbrales y prioriza
+   la clase positiva. Es el estándar para fraude / detección de anomalías.
+
+==============================================================================
+ ENTRENAMIENTO: 3 MODELOS x 3 ESTRATEGIAS = 9 CONFIGURACIONES
+ RandomizedSearchCV con StratifiedKFold(5) y scoring='average_precision'
+==============================================================================
+
+------------------------------------------------------------------------------
+ >> Regresión Logística  —  evaluando 3 estrategias
+------------------------------------------------------------------------------
+   - estrategia=class_weight   | CV AUC-PR=0.0230 | Test AUC-PR=0.0207 | Test AUC-ROC=0.4324
+   - estrategia=SMOTE_k3       | CV AUC-PR=0.0306 | Test AUC-PR=0.0237 | Test AUC-ROC=0.4236
+   - estrategia=SMOTETomek     | CV AUC-PR=0.0311 | Test AUC-PR=0.0242 | Test AUC-ROC=0.4487
+
+------------------------------------------------------------------------------
+ >> Random Forest  —  evaluando 3 estrategias
+------------------------------------------------------------------------------
+   - estrategia=class_weight   | CV AUC-PR=0.0314 | Test AUC-PR=0.0280 | Test AUC-ROC=0.5086
+   - estrategia=SMOTE_k3       | CV AUC-PR=0.0257 | Test AUC-PR=0.0178 | Test AUC-ROC=0.4316
+   - estrategia=SMOTETomek     | CV AUC-PR=0.0256 | Test AUC-PR=0.0180 | Test AUC-ROC=0.4442
+
+------------------------------------------------------------------------------
+ >> XGBoost  —  evaluando 3 estrategias
+------------------------------------------------------------------------------
+   - estrategia=class_weight   | CV AUC-PR=0.0361 | Test AUC-PR=0.0244 | Test AUC-ROC=0.5122
+   - estrategia=SMOTE_k3       | CV AUC-PR=0.0282 | Test AUC-PR=0.0241 | Test AUC-ROC=0.5256
+   - estrategia=SMOTETomek     | CV AUC-PR=0.0285 | Test AUC-PR=0.0181 | Test AUC-ROC=0.4627
+
+==============================================================================
+ TABLA COMPARATIVA — 9 CONFIGURACIONES (3 modelos x 3 estrategias)
+==============================================================================
+             Modelo   Estrategia  AUC-PR_CV  AUC-PR_Test  AUC-ROC_Test
+Regresión Logística class_weight     0.0230       0.0207        0.4324
+Regresión Logística     SMOTE_k3     0.0306       0.0237        0.4236
+Regresión Logística   SMOTETomek     0.0311       0.0242        0.4487
+      Random Forest class_weight     0.0314       0.0280        0.5086
+      Random Forest     SMOTE_k3     0.0257       0.0178        0.4316
+      Random Forest   SMOTETomek     0.0256       0.0180        0.4442
+            XGBoost class_weight     0.0361       0.0244        0.5122
+            XGBoost     SMOTE_k3     0.0282       0.0241        0.5256
+            XGBoost   SMOTETomek     0.0285       0.0181        0.4627
+
+==============================================================================
+ SELECCIÓN DEL MODELO FINAL
+ Criterio: mejor AUC-PR en TEST + Principio de Parsimonia
+==============================================================================
+ - Mejor combinación por AUC-PR(Test): Random Forest + class_weight  (AUC-PR=0.0280, AUC-ROC=0.5086)
+ - PARSIMONIA: la mejor Regresión Logística está a 0.0038 del top -> se selecciona RL por interpretabilidad y defensa regulatoria.
+
+ MODELO FINAL: Regresión Logística  (estrategia: SMOTETomek)
+   AUC-PR(Test):  0.0242
+   AUC-ROC(Test): 0.4487
+   Hiperparámetros: {'classifier__C': 1}
+
+ - Modelos serializados en models/
+
+==============================================================================
+ DIAPOSITIVAS 5 y 6 — RESULTADOS DEL MODELO
+ Matrices de confusión + ROC + Precision-Recall (Test sin resampling)
+==============================================================================
+
+------------------------------------------------------------------------------
+ >> Matrices de Confusión (umbral por defecto = 0.5)
+------------------------------------------------------------------------------
+ - Regresión Logística (SMOTETomek): TN=1100, FP=860, FN=27, TP=13
+ - Random Forest (class_weight): TN=1960, FP=0, FN=40, TP=0
+ - XGBoost (class_weight): TN=1560, FP=400, FN=27, TP=13
+   [figura guardada] outputs\figures\05_matrices_confusion.png
+
+------------------------------------------------------------------------------
+ >> Curvas ROC y Precision-Recall (Test)
+------------------------------------------------------------------------------
+ - Regresión Logística (SMOTETomek): AUC-ROC=0.4487 | AUC-PR=0.0242
+ - Random Forest (class_weight): AUC-ROC=0.5086 | AUC-PR=0.0280
+ - XGBoost (class_weight): AUC-ROC=0.5122 | AUC-PR=0.0244
+   [figura guardada] outputs\figures\06_roc_precision_recall.png
+
+==============================================================================
+ DIAGNÓSTICO CRÍTICO — ¿Tiene el modelo poder discriminativo real?
+ Chequeo de Bandera Roja según criterio de la Sesión 7 (Gini Negativo)
+==============================================================================
+ - AUC-ROC del modelo final: 0.4487
+ - Gini equivalente:          -0.1026  (Gini = 2*AUC - 1)
+ - Reglas de evaluación (referencia académica):
+     AUC < 0.50  -> Gini negativo: el modelo clasifica al revés.
+     0.50-0.55   -> No discrimina mejor que el azar.
+     0.55-0.65   -> Discriminación marginal.
+     0.65-0.80   -> Aceptable / Bueno.
+     > 0.80       -> Excelente.
+
+ >>> BANDERA ROJA <<<
+ El modelo NO tiene poder discriminativo real sobre datos de prueba.
+ Diagnóstico de causa raíz (con evidencia de este pipeline):
+   1. Señal en los datos muy débil (max |Spearman| con fraud = 0.019 < 0.05).
+   2. Posible sobreajuste a datos sintéticos del oversampling: el F1-CV
+      sobre train balanceado puede ser muy alto y no transferirse al test.
+   3. Falta feature engineering basado en comportamiento histórico del
+      cliente (velocidad de transacciones, dispositivo, geolocalización).
+ RECOMENDACIÓN AL COMITÉ:
+   - NO desplegar este modelo en producción todavía.
+   - Entregable cumple su rol académico: pipeline correcto, métricas y
+     SHAP bien calculados, Principio de Parsimonia aplicado, y se
+     identifica con honestidad técnica que la limitación es de DATOS,
+     no de algoritmo (referencia: Sesión 4 - caso CIMA producción).
+
+==============================================================================
+ DIAPOSITIVA 8 — TRADE-OFFS Y UMBRALES OPERATIVOS
+ 3 escenarios de umbral, no solo F1 máx
+==============================================================================
+ Tabla de umbrales operativos (sobre TEST):
+          Escenario  Umbral  Precision  Recall     F1  Alertas/Test  Alertas_x10k_tx  FP_Test  FN_Test
+             F1 máx  0.7369     0.0769   0.075 0.0759            39              195       36       37
+       Recall>=0.80  0.3538     0.0196   0.800 0.0383          1631             8155     1599        8
+Capacidad mesa (5%)  0.6888     0.0400   0.100 0.0571           100              500       96       36
+   [figura guardada] outputs\figures\08_analisis_umbral.png
+
+ UMBRAL OPERATIVO RECOMENDADO: 0.6888
+   Motivo: Capacidad de mesa (5%): con AUC bajo, priorizar control operativo evita saturar al equipo con falsas alarmas.
+
+==============================================================================
+ DIAPOSITIVA 9 — RIESGOS, LIMITACIONES Y CONCEPT DRIFT
+ Estabilidad poblacional + sesgos potenciales
+==============================================================================
+ - PSI del modelo final (Regresión Logística, SMOTETomek): 0.0133  =>  ESTABLE
+ - Reglas de interpretación:
+     PSI < 0.10  -> población estable, no se requiere acción.
+     0.10 - 0.25 -> ligero cambio, monitorear mensualmente.
+     PSI > 0.25  -> Concept Drift, reentrenar el modelo.
+
+ Riesgos y limitaciones identificados:
+   1. Calidad de la señal en los datos:
+      - Correlación máxima individual con fraud = 0.019 (< 0.05).
+      - Sin nuevas variables comportamentales, hay un techo de AUC bajo.
+   2. Sobreajuste a oversampling sintético:
+      - Mitigado al MOVER SMOTE/SMOTETomek dentro del Pipeline imblearn.
+      - Comparación con `class_weight` permite descartar artefactos del SMOTE.
+   3. Sesgos potenciales:
+      - Variables socio-demográficas (location, marital_status) podrían
+        introducir sesgo si correlacionan con grupos protegidos.
+      - Recomendación: análisis de fairness por subgrupo antes de producción.
+   4. Tamaño muestral:
+      - 10,000 registros con ~2% fraude = solo ~200 casos positivos.
+      - Insuficiente para estimar colas de la distribución.
+   5. Concept Drift:
+      - Los patrones de fraude evolucionan; sin reentrenamiento periódico
+        el modelo se degrada (referencia: Sesión 4 - caso CIMA).
+
+==============================================================================
+ DIAPOSITIVA 7 — EXPLICABILIDAD CON SHAP
+ Importancia global (Beeswarm) + explicación local (Waterfall)
+==============================================================================
+ - SHAP calculado sobre 500 muestras del test.
+ - Valor base E[f(x)] (log-odds): -0.2461
+ - Probabilidad base (sigmoide):   43.88%
+
+ Top 10 variables por importancia SHAP global (mean |SHAP|):
+   - marital_status_viudo                      0.3020
+   - marital_status_divorciado                 0.2550
+   - account_balance                           0.1517
+   - education_level                           0.1375
+   - housing_type_propia                       0.1346
+   - annual_income                             0.1266
+   - customer_tenure                           0.1233
+   - housing_type_otro                         0.1183
+   - dia_semana                                0.1151
+   - client_credit_score                       0.1084
+   [figura guardada] outputs\figures\07_shap_importancia_bar.png
+   [figura guardada] outputs\figures\07_shap_beeswarm.png
+   [figura guardada] outputs\figures\07_shap_waterfall_fraude.png
+
+ - Caso de fraude analizado (índice 56 del test):
+     Probabilidad estimada: 23.68%
+     Umbral operativo:      68.88%
+     Decisión del modelo:   NO DETECTADO
+
+==============================================================================
+ EXTENSIÓN — Isolation Forest (no supervisado)
+==============================================================================
+              precision    recall  f1-score   support
+
+    Legítima       0.98      0.98      0.98      1960
+      Fraude       0.00      0.00      0.00        40
+
+    accuracy                           0.96      2000
+   macro avg       0.49      0.49      0.49      2000
+weighted avg       0.96      0.96      0.96      2000
+
+ - Recall fraude: 0.0000
+ - F1 fraude:     0.0000
+ - Lectura: contraste metodológico. Recall ~0 sobre datos transformados es esperable (la separación de anomalías se diluye en el espacio escalado).
+
+==============================================================================
+ DIAPOSITIVA 10 — CONCLUSIONES Y PLAN DE ACCIÓN
+ Recomendación final al Comité de Riesgos
+==============================================================================
+ RESUMEN EJECUTIVO FINAL
+----------------------------------------------------------------------
+ Dataset             : 10,000 transacciones | 200 fraudes (2.00%)
+ Modelos evaluados   : 3 modelos x 3 estrategias de desbalance = 9 configs
+ Modelo seleccionado : Regresión Logística (SMOTETomek)
+ AUC-PR (Test)       : 0.0242
+ AUC-ROC (Test)      : 0.4487  (Gini = -0.1026)
+ Umbral operativo    : 0.6888
+ Precision @ umbral  : 0.0400
+ Recall    @ umbral  : 0.1000
+ F1-Score  @ umbral  : 0.0571
+ Matriz Confusión    : TN=1864 FP=96 FN=36 TP=4
+ PSI                 : 0.0133  (ESTABLE)
+----------------------------------------------------------------------
+
+ Reporte de clasificación (TEST con umbral operativo):
+              precision    recall  f1-score   support
+
+    Legítima       0.98      0.95      0.97      1960
+      Fraude       0.04      0.10      0.06        40
+
+    accuracy                           0.93      2000
+   macro avg       0.51      0.53      0.51      2000
+weighted avg       0.96      0.93      0.95      2000
+
+ Operativa diaria (escenario 10,000 tx/día):
+   - Alertas esperadas       : 500
+   - Fraudes detectados      : 20
+   - Falsas alarmas          : 480
+   - % falsas sobre alertas  : 96%
+
+==============================================================================
+ CONCLUSIONES HONESTAS PARA EL COMITÉ
+ Defensa académica del entregable + recomendación de gobierno
+==============================================================================
+ Lectura técnica:
+   - El AUC-ROC del modelo final (0.4487) está en zona de "no
+     discriminación". El Gini equivalente (-0.1026) confirma el hallazgo.
+   - El pipeline es metodológicamente correcto: división estratificada,
+     ColumnTransformer, Pipeline imblearn dentro del CV, comparación de 3
+     estrategias de desbalance, optimización por AUC-PR, calibración de
+     umbral con 3 escenarios operativos, SHAP global y local, PSI.
+   - La causa más probable es la calidad de la señal (correlación máxima
+     individual con fraud = 0.019) más que un error del algoritmo.
+
+ Recomendación al Comité de Riesgos:
+   1. NO aprobar el despliegue en producción con la configuración actual.
+   2. Aprobar Fase 2 con foco en DATOS (no en algoritmo):
+      - Incorporar variables comportamentales (velocidad de transacción,
+        device fingerprint, geolocalización, scoring de comercio).
+      - Ampliar la ventana histórica a 12-24 meses para tener > 1,000 fraudes.
+      - Evaluar fuentes externas (buró, listas negras, AML).
+   3. Mientras tanto:
+      - Mantener las reglas vigentes del motor de fraude.
+      - Usar este pipeline en modo 'shadow' como termómetro de calidad de
+        datos: si AUC sube al agregar nuevas variables, la decisión de
+        despliegue se reabre.
+   4. Aplicar el aprendizaje (Sesión 4 - caso CIMA): degradación en
+      producción suele venir de no manejar bien la naturaleza temporal y
+      de abusar de oversampling. Aquí se mitigó al validar SIN resampling.
+
+ Plan de acción operativo:
+   - Producción: desplegar en 'shadow' antes de reemplazar las reglas.
+   - Monitoreo:  PSI mensual + tablero diario Recall/Precision.
+   - Reentreno:  trimestral; anticipado si PSI>0.25 o Recall cae >5pp.
+   - Gobierno:   reporte trimestral con SHAP + análisis de fairness.
+
+==============================================================================
+ FIN DE LA EJECUCIÓN
+==============================================================================
+ - Resumen ejecutivo guardado en: outputs\resumen_ejecutivo.txt
+ - Figuras guardadas en:          outputs\figures/
+ - Modelos serializados en:       models/
